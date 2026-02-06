@@ -1,0 +1,43 @@
+# Build artifacts
+build/
+cmake-build-*/
+out/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Compiled files
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Generated test protos (will be built)
+tests/*.pb.h
+tests/*.pb.cc
+
+# Test results
+Testing/
+*.log
