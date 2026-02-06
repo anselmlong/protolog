@@ -193,11 +193,11 @@ class StringFieldGenerator(FieldGenerator):
                 "}",
                 "",
                 f"void {class_name}::set_{self.name}(absl::string_view value) {{",
-                f"  {field_ident}.Set(value, arena);",
+                f"  {field_ident}.Set(value, arena_);",
                 "}",
                 "",
                 f"std::string* {class_name}::mutable_{self.name}() {{",
-                f"  return {field_ident}.Mutable(arena);",
+                f"  return {field_ident}.Mutable(arena_);",
                 "}",
             ]
         )
@@ -260,7 +260,7 @@ class MessageFieldGenerator(FieldGenerator):
                 "",
                 f"{message_type}* {class_name}::mutable_{self.name}() {{",
                 f"  if ({field_ident} == nullptr) {{",
-                f"    {field_ident} = Arena::Create<{message_type}>(arena);",
+                f"    {field_ident} = ::google::protobuf::Arena::CreateMessage<{message_type}>(arena_);",
                 "  }",
                 f"  return {field_ident};",
                 "}",

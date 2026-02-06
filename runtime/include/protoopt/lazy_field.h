@@ -2,6 +2,7 @@
 #ifndef PROTOOPT_LAZY_FIELD_H_
 #define PROTOOPT_LAZY_FIELD_H_
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -41,6 +42,11 @@ class LazyField {
         arena_(arena),
         has_value_(false) {}
 
+  // Lock-free read optimization: check state without locking
+  bool IsParsed() const {
+    return state_.load(std::memory_order_acquire) != UNPARSED;
+  }
+
   ~LazyField() {
     if (arena_ == nullptr) {
       delete message_;
@@ -60,16 +66,28 @@ class LazyField {
     }
 
     std::lock_guard<std::mutex> lock(mu_);
+    
+    // Arena reassignment safety: If we're changing arenas and have a parsed message,
+    // we need to handle the transition properly. Messages are tied to their arena.
+    if (arena != nullptr && arena_ != nullptr && arena_ != arena && message_ != nullptr) {
+      // Cannot easily move between arenas. Clear the message and re-parse on new arena.
+      // The old arena keeps ownership of the old message.
+      message_ = nullptr;
+    }
+    
+    // If switching from heap to arena, delete heap-allocated message
     if (arena_ == nullptr && arena != nullptr && message_ != nullptr) {
       delete message_;
       message_ = nullptr;
     }
-    if (arena != nullptr) {
+    
+    // Only set arena if we don't have one yet, or if explicitly provided
+    if (arena_ == nullptr && arena != nullptr) {
       arena_ = arena;
     }
 
     unparsed_bytes_.assign(payload, static_cast<size_t>(size));
-    state_ = UNPARSED;
+    state_.store(UNPARSED, std::memory_order_release);
     has_value_ = true;
     return payload + size;
   }
@@ -140,7 +158,7 @@ class LazyField {
     std::lock_guard<std::mutex> lock(mu_);
     unparsed_bytes_.clear();
     has_value_ = false;
-    state_ = UNPARSED;
+    state_.store(UNPARSED, std::memory_order_release);
 
     if (message_ != nullptr) {
       message_->Clear();
@@ -158,22 +176,30 @@ class LazyField {
     arena_ = arena;
     has_value_ = (message != nullptr);
     unparsed_bytes_.clear();
-    state_ = has_value_ ? DIRTY : UNPARSED;
+    state_.store(has_value_ ? DIRTY : UNPARSED, std::memory_order_release);
   }
 
  private:
   enum State { UNPARSED, PARSED, DIRTY };
 
   void EnsureParsed() const {
+    // Fast path: already parsed, no lock needed
+    if (IsParsed()) return;
+    // Slow path: need to parse under lock
     std::lock_guard<std::mutex> lock(mu_);
     EnsureParsedLocked();
   }
 
   void EnsureParsedNonConst() {
+    // Fast path: already parsed and marked dirty
+    State current = state_.load(std::memory_order_acquire);
+    if (current == DIRTY && message_ != nullptr) return;
+    // Slow path: need to parse under lock
     std::lock_guard<std::mutex> lock(mu_);
     EnsureParsedLocked();
-    if (state_ != DIRTY) {
-      state_ = DIRTY;
+    current = state_.load(std::memory_order_relaxed);
+    if (current != DIRTY) {
+      state_.store(DIRTY, std::memory_order_release);
       unparsed_bytes_.clear();
     }
     has_value_ = true;
@@ -195,7 +221,7 @@ class LazyField {
 
     if (unparsed_bytes_.empty()) {
       message_->Clear();
-      state_ = PARSED;
+      state_.store(PARSED, std::memory_order_release);
       return;
     }
 
@@ -203,27 +229,42 @@ class LazyField {
                                   static_cast<int>(unparsed_bytes_.size()))) {
       message_->Clear();
     }
-    state_ = PARSED;
+    state_.store(PARSED, std::memory_order_release);
   }
 
   MessageType* CreateMessage() const {
-    if (arena_ != nullptr &&
-        std::is_constructible<MessageType, Arena*>::value) {
-      return new MessageType(arena_);
+#if PROTOOPT_HAS_PROTOBUF_ARENA
+    if (arena_ != nullptr) {
+      return ::google::protobuf::Arena::CreateMessage<MessageType>(arena_);
     }
+#endif
     return new MessageType();
   }
 
   static const char* ReadVarint32(const char* ptr, uint32_t* value) {
+    const uint8_t* p = reinterpret_cast<const uint8_t*>(ptr);
     uint32_t result = 0;
-    for (int shift = 0; shift < 35; shift += 7) {
-      const uint8_t byte = static_cast<uint8_t>(*ptr++);
-      result |= static_cast<uint32_t>(byte & 0x7F) << shift;
-      if ((byte & 0x80u) == 0) {
-        *value = result;
-        return ptr;
-      }
-    }
+    uint32_t shift = 0;
+    
+    // Unrolled loop for maximum speed - varint32 maxes at 5 bytes
+    #define PROTOOPT_READ_BYTE32 \
+      do { \
+        const uint8_t byte = *p++; \
+        result |= static_cast<uint32_t>(byte & 0x7Fu) << shift; \
+        if ((byte & 0x80u) == 0u) { \
+          *value = result; \
+          return reinterpret_cast<const char*>(p); \
+        } \
+        shift += 7; \
+      } while (0)
+    
+    PROTOOPT_READ_BYTE32;
+    PROTOOPT_READ_BYTE32;
+    PROTOOPT_READ_BYTE32;
+    PROTOOPT_READ_BYTE32;
+    PROTOOPT_READ_BYTE32;
+    
+    #undef PROTOOPT_READ_BYTE32
     return nullptr;
   }
 
@@ -256,7 +297,7 @@ class LazyField {
   }
 
   mutable std::mutex mu_;
-  mutable State state_;
+  mutable std::atomic<State> state_;
   mutable std::string unparsed_bytes_;
   mutable MessageType* message_;
   Arena* arena_;

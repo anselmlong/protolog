@@ -83,10 +83,13 @@ void ArenaString::Clear() {
     case kDefault:
       return;
     case kAllocated:
-    case kMutableArena:
-      DecodeMutablePtr(tagged_ptr_)->clear();
+      delete DecodeMutablePtr(tagged_ptr_);
+      SetDefault();
       return;
+    case kMutableArena:
     case kFixedSizeArena:
+      // Arena owns the memory; just reset to default state.
+      // The arena-allocated string will be cleaned up when the arena is destroyed.
       SetDefault();
       return;
   }
