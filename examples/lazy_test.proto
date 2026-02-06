@@ -1,0 +1,31 @@
+syntax = "proto3";
+package examples;
+
+// Large payload message
+message LargePayload {
+  repeated string items = 1;
+  bytes binary_data = 2;
+  map<string, string> metadata = 3;
+}
+
+// Message with lazy fields
+message MessageWithLazyFields {
+  string id = 1;
+  int32 priority = 2;
+  
+  // This field uses deferred parsing - stores raw bytes until accessed
+  LargePayload lazy_payload = 3 [lazy = true];
+  
+  // Regular field for comparison
+  LargePayload eager_payload = 4;
+  
+  string timestamp = 5;
+}
+
+// Multiple lazy fields
+message MultipleLazyFields {
+  string name = 1;
+  LargePayload first = 2 [lazy = true];
+  LargePayload second = 3 [lazy = true];
+  int32 count = 4;
+}

@@ -1,0 +1,18 @@
+syntax = "proto3";
+package examples;
+
+// Simple message with various field types
+message SimpleMessage {
+  int32 id = 1;
+  string name = 2;
+  double value = 3;
+  bool active = 4;
+  bytes data = 5;
+}
+
+// Message with nested submessage
+message OuterMessage {
+  string header = 1;
+  SimpleMessage inner = 2;
+  int32 footer = 3;
+}
