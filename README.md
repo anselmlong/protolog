@@ -1,6 +1,6 @@
 # cpp-proto-optimizer
 
-A high-performance C++ Protocol Buffers code generator with three major optimizations not available in the open-source protobuf release:
+An experimental C++ Protocol Buffers code generator exploring three optimizations:
 
 - **[lazy = true]**: Deferred parsing for submessage fields
 - **Arena-allocated strings with string_view**: Zero-copy string access  
@@ -14,15 +14,11 @@ Google's internal protobuf implementation includes performance features that nev
 - SIMD varint decoding
 - Cord integration
 
-This project reverse-engineers and implements the most impactful of these optimizations.
+This project explores these techniques in a custom generator and runtime. It is a prototype, not a drop-in replacement for the official C++ generator.
 
-## Performance Improvements
+## Performance Validation
 
-| Optimization | Memory Reduction | Speed Improvement |
-|--------------|------------------|-------------------|
-| [lazy=true] | 50-80% for unaccessed fields | 20-30% parse time |
-| Arena strings | 30-40% per string field | 15-25% allocation |
-| Unknown field skip | 40-80 bytes per unknown field | 30-50% parse speed |
+The repository includes `examples/benchmark.proto`, but does not yet include a reproducible benchmark harness or published measurements. Performance benefits are hypotheses to measure against the official generator using the same schemas, compiler, protobuf version, allocator, and hardware. No speedup or memory-reduction guarantee is currently established.
 
 ## Features
 
@@ -69,7 +65,7 @@ Skip storage of unknown fields entirely:
 ```
 
 **Benefits:**
-- 30-50% faster parsing
+- Avoids the work of retaining unknown fields
 - Eliminates UnknownFieldSet allocation
 - Ideal for terminal message consumers
 
@@ -182,22 +178,23 @@ cpp-proto-optimizer/
 | Arena strings | Partial | ✅ Full arena allocation |
 | String views | ❌ | ✅ Zero-copy accessors |
 | Unknown field skip | ❌ | ✅ Compile-time option |
-| Reflection | ✅ | ✅ Compatible |
-| Binary compat | N/A | Wire-format identical |
+| Reflection | Available | Not implemented: metadata pointers are null |
+| Binary compat | Reference implementation | Intended wire compatibility; conformance not established |
 
 ## Limitations
 
 1. **Lazy fields**: Only works for singular submessage fields
 2. **Unknown field skip**: Cannot forward messages after skipping
-3. **Reflection**: Lazy fields parse when accessed via reflection
+3. **Reflection**: `GetMetadata()` returns null descriptor and reflection pointers. Do not pass generated messages to reflection-dependent APIs (including descriptor inspection, generic JSON/TextFormat conversion, or reflection-based utilities). Merely inheriting from `google::protobuf::Message` does not establish compatibility with those APIs.
 4. **Determinism**: Lazy fields may affect byte-for-byte serialization
+5. **API and version support**: The generator uses protobuf implementation APIs. The documented minimum version is not a tested compatibility matrix. Validate compilation and round-trip behavior on the exact protobuf version and schemas used by your application before adopting it.
 
 ## Contributing
 
 Contributions welcome! Areas for improvement:
 - SIMD varint decoding
 - Cord integration  
-- Reflection optimizations
+- Descriptor registration and reflection support
 - Additional language bindings
 
 ## License
